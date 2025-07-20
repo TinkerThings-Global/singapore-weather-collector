@@ -1,9 +1,9 @@
 [project]
-name = "intel"
+name = "singapore-weather-collector"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.28.1",
     "polars>=1.31.0",

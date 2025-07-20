@@ -15,12 +15,23 @@ class DataGapAnalyzer:
 
     def detect_gaps(self, df: pl.DataFrame, target_date: date) -> List[TimeRange]:
         """Detect gaps in timestamp data for a specific date"""
+        # Get current time for today's edge case handling
+        current_time = datetime.now()
+        
+        # For today, only check up to current time (minus buffer for API delay)
+        if target_date == current_time.date():
+            max_expected_time = current_time - timedelta(minutes=5)  # 5 min buffer
+            if max_expected_time.time() < time(0, 5):  # Too early in day
+                return []  # No gaps to check yet
+        else:
+            max_expected_time = datetime.combine(target_date, time(23, 59))
+        
         if df.height == 0:
-            # Empty file - entire day is a gap
+            # Empty file - gap from start to max_expected_time
             return [
                 TimeRange(
                     start=datetime.combine(target_date, time(0, 0)),
-                    end=datetime.combine(target_date, time(23, 59)),
+                    end=max_expected_time,
                 )
             ]
 
@@ -37,6 +48,7 @@ class DataGapAnalyzer:
             (pl.col("timestamp") >= target_start) & (pl.col("timestamp") <= target_end)
         )
 
+        # Get all timestamps (including those with null values - they represent confirmed API missing data)
         timestamps = df_filtered.get_column("timestamp").to_list()
 
         # Safety check after processing
@@ -52,7 +64,7 @@ class DataGapAnalyzer:
 
         # Expected start and end times (always timezone-naive)
         expected_start = datetime.combine(target_date, time(0, 0))
-        expected_end = datetime.combine(target_date, time(23, 59))
+        expected_end = max_expected_time
 
         # Check if data starts after midnight
         if timestamps[0] > expected_start:
@@ -105,7 +117,7 @@ class DataGapAnalyzer:
             logger.error(f"Error checking completeness for {file_path}: {e}")
             return False
 
-    def get_incomplete_dates(self, exclude_today: bool = True) -> List[date]:
+    def get_incomplete_dates(self, exclude_today: bool = False) -> List[date]:
         """
         Get list of dates with incomplete data
 

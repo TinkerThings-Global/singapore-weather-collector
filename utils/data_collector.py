@@ -1,7 +1,7 @@
 from .logger import Logger
 import asyncio
-from datetime import datetime, date, time
-from typing import List
+from datetime import datetime, date, time, timedelta
+from typing import List, Optional
 from models import Config, TimeRange
 import httpx
 import polars as pl
@@ -55,6 +55,7 @@ def process_and_save_worker(
             .sort("timestamp")
             .unique(subset=["timestamp"], keep="last")
         )
+        
 
         file_path = data_dir / f"{data_type}_{station_id}_{target_date_str}.csv"
 
@@ -362,6 +363,52 @@ class WeatherDataCollector:
                 last_updated=datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
             )
 
+    async def add_null_records(self, time_range: TimeRange, target_date: date, data_type: str):
+        """Add null records for genuinely missing API data during gap-filling"""
+        # Generate timestamps for the gap
+        missing_timestamps = []
+        current_time = time_range.start
+        while current_time <= time_range.end:
+            missing_timestamps.append(current_time)
+            current_time += timedelta(minutes=1)
+        
+        if not missing_timestamps:
+            return
+        
+        # Create DataFrame with null values
+        value_col_name = self.config.API_VALUE_COLS[data_type]
+        null_df = pl.DataFrame({
+            "timestamp": missing_timestamps,
+            value_col_name: [None] * len(missing_timestamps)
+        })
+        
+        # Save to CSV file
+        file_path = self.config.DATA_DIR / f"{data_type}_{self.config.STATION_ID}_{target_date.isoformat()}.csv"
+        
+        if file_path.exists():
+            # Merge with existing data
+            existing = pl.read_csv(file_path, try_parse_dates=True)
+            if existing.select("timestamp").dtypes[0] == pl.String:
+                existing = existing.with_columns(
+                    pl.col("timestamp").str.to_datetime().dt.replace_time_zone(None)
+                )
+            else:
+                existing = existing.with_columns(
+                    pl.col("timestamp").dt.replace_time_zone(None)
+                )
+            merged = (
+                pl.concat([existing, null_df])
+                .unique(subset=["timestamp"], keep="last")
+                .sort("timestamp")
+            )
+            merged.write_csv(file_path)
+            total_records = merged.height
+        else:
+            null_df.write_csv(file_path)
+            total_records = null_df.height
+        
+        logger.info(f"Added {len(missing_timestamps)} null records for {data_type} on {target_date}")
+
     async def collect_data_for_range(
         self,
         client: httpx.AsyncClient,
@@ -386,6 +433,9 @@ class WeatherDataCollector:
 
             if raw_data:
                 await self.process_and_save_data(raw_data, target_date, data_type)
+            elif is_gap_filling:
+                # API returned no data for gap-filling - add null records
+                await self.add_null_records(time_range, target_date, data_type)
 
         except Exception as e:
             logger.error(
