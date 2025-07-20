@@ -12,6 +12,7 @@ A robust, high-performance weather data collection system that fetches real-time
 - **Progress Tracking**: JSON-based progress tracking with detailed completeness analysis
 - **Flexible Query Strategy**: Automatically chooses between date-only and time-specific queries based on gap size
 - **Data Validation**: Built-in data quality checks and duplicate removal
+- **Null Handling**: Intelligent handling of genuinely missing API data with null record creation
 
 ## Architecture
 
@@ -41,15 +42,15 @@ A robust, high-performance weather data collection system that fetches real-time
 
 ### Prerequisites
 
-- Python 3.9+
+- Python 3.12+
 - [uv](https://docs.astral.sh/uv/) package manager
 
 ### Installation
 
 ```bash
 # Clone the repository
-git clone <repository-url>
-cd intel
+git clone https://github.com/TinkerThings-Global/singapore-weather-collector.git
+cd singapore-weather-collector
 
 # Install dependencies using uv
 uv sync
@@ -59,7 +60,7 @@ uv sync
 
 ```bash
 # Run data collection
-uv run python main.py
+uv run main.py
 ```
 
 ### Configuration
@@ -118,6 +119,16 @@ The system implements sophisticated gap detection:
 2. **Minute-level Precision**: Detects gaps larger than 1 minute
 3. **Boundary Checking**: Verifies data starts at 00:00 and ends at 23:59
 4. **Duplicate Handling**: Removes duplicate timestamps, keeping the latest value
+5. **Time-aware Processing**: For today's data, only checks up to current time minus 5-minute buffer
+
+### Null Data Handling
+
+The system intelligently handles genuinely missing API data:
+
+1. **Gap vs Missing Distinction**: Differentiates between data collection gaps and API data unavailability
+2. **Null Record Creation**: Creates null records for timestamps where API returns no data during gap-filling
+3. **Prevents Infinite Retries**: Avoids repeatedly requesting data that doesn't exist at the API level
+4. **Data Completeness**: Marks files as complete even with null values for missing periods
 
 ### Multi-Pass Collection Strategy
 
@@ -160,7 +171,7 @@ The system maintains detailed progress in `fetch_progress.json`:
 
 ```bash
 # Check completeness for specific date
-uv run python -c "
+uv run -c "
 from models import Config
 from utils.gap_analyzer import DataGapAnalyzer
 from datetime import date
@@ -176,7 +187,7 @@ print(summary)
 If progress tracking becomes inconsistent:
 
 ```bash
-uv run python rebuild_progress.py
+uv run rebuild_progress.py
 ```
 
 ## Monitoring and Logs
